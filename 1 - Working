@@ -1,0 +1,216 @@
+###############################
+## AP Audit: Working file
+
+# SetWd
+setwd("~/Bioinformatics Work/AntiPsych_Calc/AP_audit")
+
+# Load package libraries
+library(dplyr)
+library(tidyverse)
+library(ggplot2)
+
+# Load patient dataset
+# cannot set patient ID as rownames due to duplicates for timepoints (vertical data)
+# need to permit strings as factors
+workingDF <- read.table("Data_test.txt", sep ="\t", header = TRUE, stringsAsFactors = TRUE)
+testset <- read.table("Testing_set.txt", sep ="\t", header = TRUE, stringsAsFactors = TRUE)
+
+# Load the reference tables
+Depot_ref <- read.table("Depot_lookup2.txt", sep = "\t", header = TRUE)
+Oral_ref <- read.table("Oral_lookup2.txt", sep = "\t",header = TRUE)
+
+# Create the working dataframe
+#workingDF <- createDF(workingDF)
+
+# Create the TDD column
+workingDF <- calcTDD(workingDF)
+
+# Create the BNF column
+# currently as new dataframe
+check <- calcBNF(workingDF, Oral_ref, Depot_ref)
+
+# Create the total BNF column
+check$Total_BNF <- sumBNF(check)
+
+
+
+##############################################
+# ?Stats and graphing in seperate r script?
+
+
+# this will given summary 
+tapply(check$Total_BNF, check$Timepoint, summary)
+## calculate percentage
+(nrow(check[check$Total_BNF > 1.5, ]) / nrow(check)) * 100
+## this works, but how by group??
+
+
+
+
+## gotta do an "if else" to get the factor levels??
+
+#### factor levels with cut
+check$BNFcategory <- cut(check$Total_BNF, 
+                         breaks=c(- Inf,1, 1.5, 2, Inf), 
+                         labels=c("<1","1-1.5","1.5-2", ">2"))
+levels(check$BNFcategory)
+
+
+getPercentages <- function(dataFrame, colName) {
+  dataFrame.cnt <- dataFrame %>% 
+    select({{colName}}) %>% 
+    table() %>%
+    as.data.frame() %>% 
+    rename({{colName}} :=1, Freq=2) %>% 
+    mutate(Perc=100*Freq/sum(Freq))
+}
+
+per <- getPercentages(check, BNFcategory)
+#this does work to create broad percentage table, but how to do counts by groups??
+
+per2 <- group_by(check, Patient.Key) %>% transmute(Timepoint, count(BNFcategory)/sum(BNFcategory))
+
+
+### this will give a count table by 2 x groups (patient and timepoint)
+test <- check %>% 
+  filter(complete.cases(BNFcategory)) %>% 
+  group_by(check$Patient.Key,check$Timepoint) %>% 
+  count(BNFcategory)
+test$percentage1 <- (prop.table(test$n))*100
+
+### just one grouping
+test <- check %>% 
+  filter(complete.cases(BNFcategory)) %>% 
+  group_by(check$Timepoint) %>% 
+  count(BNFcategory)
+#now add this as a column
+test$percentage <-  test %>% group_by(test$Timepoint) %>% (prop.table(test$n))*100
+## reset the colname to be nice
+colnames(test)[1] <- "Timepoint"
+
+levels(test2$BNFcategory)
+
+
+
+test2 <- read.table("Percent_by_timpoint.txt", sep = "\t", header = TRUE)
+levels(test2$BNFcategory)
+## reorder the levels, want reverse order
+test2$BNFcategory <- ordered(test2$BNFcategory, levels = c("<1","1-1.5","1.5-2",">2"))
+
+
+## plot by timepoint of X, percentage on Y, with fill by BNF variable 
+## demonstrate the proportion
+library(scales)
+
+ggplot(test2, aes(factor(Timepoint), Percentage, fill = BNFcategory)) +
+  geom_bar(position = "fill", stat = "identity") +
+  scale_y_continuous(labels = percent) +
+  scale_fill_manual(values = c("springgreen4", "goldenrod", "firebrick3", "orangered4")) +
+  xlab("Timepoint")
+ 
+
+
+
+
+
+
+
+#plotting
+#### plotting BNF by patient ?
+
+pat.pch <- as.numeric(check$Patient.Key)
+plot(check$Timepoint, check$Total_BNF, pch = pat.pch)
+abline(h= 1.5, col = "red")
+
+##abline
+## v = x values for vertical lines
+## h = y values for horizontal lines
+
+ggplot(data = check, aes(x = as.factor(Timepoint), y = Total_BNF, color = Patient.Key)) +       
+  geom_line(aes(group = Patient.Key)) + geom_point()
+
+## add in a line at 1.5 BNF
+## in ggplot, this is geom_abline / geom_hline / geom_vline
+ggplot(data = check, aes(x = as.factor(Timepoint), y = Total_BNF, color = Patient.Key)) +       
+  geom_line(aes(group = Patient.Key)) + geom_point() + geom_hline(yintercept = 1.5)
+
+
+check %>% group_by(Patient.Key) %>%
+  count(AP1)
+
+### Doing anovas, plotting by timepoint
+
+library("ggpubr")
+p <- ggboxplot(check, x = "Timepoint", y = "Total_BNF", 
+          color = "Timepoint", palette = c("#00AFBB", "#E7B800", "#FC4E07", "forestgreen", "blue", "red"),
+          size = 2,
+          order = c("1", "2", "3", "4", "5", "6"),
+          ylab = "Total BNF Factor", xlab = "Timepoint")
+          
+p + theme(legend.position = "none") + labs(title = "Boxplot of Cumulative BNF Factor Values by Timepoint", subtitle = "ANOVA(F(5,97) = 1.818, p = 0.116))")
+
+
+#ggline(check, x = "Timepoint", y = "Total_BNF", 
+#          color = "Timepoint", palette = c("#00AFBB", "#E7B800", "#FC4E07", "red", "green", "blue" ),
+#          order = c("1", "2", "3", "4", "5", "6"),
+#         ylab = "Weight", xlab = "Treatment")
+
+
+timefactor <- factor(check$Timepoint)
+levels(timefactor)
+# Compute the analysis of variance
+res.aov <- aov(Total_BNF ~ timefactor, data = check)
+# Summary of the analysis
+summary(res.aov)
+TukeyHSD(res.aov)
+
+
+res.cor <- cor.test(check$Total_BNF, check$Readmissions, method = "pearson", use = "complete.obs")
+res.cor
+
+### create a readmission factor
+
+### replace the NAs with 0 in the readmission column
+is.na(check$Readmissions)
+check$Readmissions[is.na(check$Readmissions)] <- 0
+
+readmit <- as.factor()
+
+## create the factor and check the levels
+check$readmit_category <- cut(check$Readmissions, 
+                         breaks=c(-Inf, 1, Inf), 
+                         labels=c("False", "True"))
+levels(check$readmit_category)
+
+
+## 
+library(oddsratio)
+dsRatio(check, level = 95, fac = readmit_category, y = Total_BNF, signif.stars = TRUE)
+
+
+table(check$Patient.Key)
+x <- check %>% 
+  group_by(Patient.Key) %>%
+  summarise(no_rows = length(Patient.Key))
+
+write.table(xy, file = "ap_count1.txt", sep = "\t")
+
+xy <- check %>% 
+  group_by(Patient.Key) %>%
+  count(readmit_category)
+
+  test <- check %>% 
+  filter(complete.cases(BNFcategory)) %>% 
+  group_by(check$Timepoint) %>% 
+  count(BNFcategory)
+  
+xy <- check %>% 
+    group_by(Timepoint) %>%
+    count(Readmissions)
+
+
+
+######################
+### create a data frame with Patient Key, Timepoint, combined AP + AP_route
+#table
+#proptable
