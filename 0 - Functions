@@ -1,0 +1,143 @@
+####### AP AUdit script
+
+## flow of functions
+#### 1 - calculate TDD for AP1, oral & LAI
+#### 2 - Add in the max daily dose column
+## Repeat for AP2, AP3, AP4
+## 3 -  calculate BNF for each AP
+## 4 - Sum 
+
+# Load libraries
+library(dplyr)
+library(magicfor)
+library(ggplot2)
+
+#Set WD
+setwd("~/Bioinformatics Work/AntiPsych_Calc/AP_audit")
+
+## Load testing dataset
+#cannot set patient ID as rownames due to duplicates for timepoints (vertical data)
+testset <- read.table("Testing_set.txt", sep ="\t", header = TRUE, stringsAsFactors = TRUE)
+
+## Load in the reference tables
+Depot_ref <- read.table("Depot_lookup2.txt", sep = "\t", header = TRUE)
+Oral_ref <- read.table("Oral_lookup2.txt", sep = "\t",header = TRUE)
+
+
+#create a new dataframe for the outputs
+#for now just using AP1, later will add in others
+createDF <- function(dataFrame)
+{
+  
+  patientID <- dataFrame['Patient.Key']
+  timepoint <- dataFrame['Timepoint']
+  AP1 <- dataFrame['AP1']
+  AP1_route <- dataFrame['AP1_route']
+  AP1_dose <- dataFrame['AP1_dose']
+  AP1_timing <- dataFrame['AP1_timing']
+  AP2 <- dataFrame['AP2']
+  AP2_route <- dataFrame['AP2_route']
+  AP2_dose <- dataFrame['AP2_dose']
+  AP2_timing <- dataFrame['AP2_timing']
+  AP3 <- dataFrame['AP3']
+  AP3_route <- dataFrame['AP3_route']
+  AP3_dose <- dataFrame['AP3_dose']
+  AP3_timing <- dataFrame['AP3_timing']
+  ##print this out, #sep puts the character between
+  as.data.frame(c(patientID,timepoint,AP1,AP1_route, AP1_dose, AP1_timing, 
+                  AP2, AP2_route, AP2_dose, AP2_timing,
+                  AP3, AP3_route, AP3_dose, AP3_timing))
+  
+}
+
+workingDF <- createDF(testset)
+
+
+# Function to create the column with the TDD
+calcTDD <- function(dataFrame){
+  
+  meds <- list("AP1", "AP2", "AP3")
+  for (i in meds)
+  {
+    route <- paste(i,"_route", sep = "")
+    tdd <- paste(i, "_TDD", sep ="")
+    dose <- paste(i, "_dose", sep = "")
+    timing <- paste(i, "_timing", sep = "")
+    
+    for (i in 1:nrow(dataFrame)){
+      if (dataFrame[i,route] == "oral")
+      {
+        dataFrame[i,tdd] = dataFrame[i, dose]
+      }
+      else if (dataFrame[i,route] == "LAI") 
+      {
+        dataFrame[i,tdd] = (dataFrame[i, dose] / dataFrame[i, timing]) / 7
+      }
+      else if  (is.na(dataFrame[i,route]))
+      {
+        dataFrame[i,tdd] = "NA"
+      }
+    }
+  }
+  dataFrame
+  
+}
+
+## create the TDD column
+workingDF <- calcTDD(workingDF)
+
+
+### Function to calculate the BNF factor for all APs, using the lookup table
+##### Substitute zeros for NAs in this move
+calcBNF <- function(dataFrame, lookUpTableOral, lookUpTableDepot){
+  
+  meds <- list("AP1", "AP2", "AP3")
+  for (i in meds)
+  {
+    AP <- i
+    route <- paste(i,"_route", sep = "")
+    tdd <- paste(i, "_TDD", sep ="")
+    dose <- paste(i, "_dose", sep = "")
+    timing <- paste(i, "_timing", sep = "")
+    bnf <- paste(i, "_BNF_factor", sep = "")
+    
+    for (i in 1:nrow(dataFrame))
+    {
+      if (dataFrame[i,route] == "oral")
+      {
+        dataFrame[i, bnf] = dataFrame[i,tdd] / (lookUpTableOral[match(dataFrame[i, AP], lookUpTableOral$Drug.Name),"MaxDose"])
+      }
+      else 
+      {
+        dataFrame[i,bnf] = dataFrame[i,tdd] / (lookUpTableDepot[match(dataFrame[i, AP], lookUpTableDepot$Drug.Name),"MaxDose"])
+      }
+      if (is.na(dataFrame[i,bnf]))
+      {
+        dataFrame[i,bnf] <- 0;
+      }
+    }
+  }
+  dataFrame
+}
+
+# create the BNF column
+## I made a new table for this but later will make it same table??
+check <- calcBNF(workingDF, Oral_ref, Depot_ref)
+
+
+### time to sum some sums
+sumBNF <- function(dataFrame) 
+{
+  ap1 <- "AP1_BNF_factor"
+  ap2 <- "AP2_BNF_factor"
+  ap3 <- "AP3_BNF_factor"
+  dataFrame$Total_BNF = dataFrame %>% select(ap1:ap3) %>% rowSums(na.rm = TRUE)
+  dataFrame$Total_BNF
+}
+
+check$Total_BNF <- sumBNF(check)
+
+
+
+
+
